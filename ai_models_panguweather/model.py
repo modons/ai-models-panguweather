@@ -72,27 +72,42 @@ class PanguWeather(Model):
         os.stat(pangu_weather_24)
         os.stat(pangu_weather_6)
 
-        with self.timer(f"Loading {pangu_weather_24}"):
-            ort_session_24 = ort.InferenceSession(
-                pangu_weather_24,
-                sess_options=options,
-                providers=self.providers,
-            )
+        # GH mods--option to run with 24h timesteps
+        if self.dt==24:
+            with self.timer(f"Loading {pangu_weather_24}"):
+                ort_session_24 = ort.InferenceSession(
+                    pangu_weather_24,
+                    sess_options=options,
+                    providers=self.providers,
+                )
 
-        with self.timer(f"Loading {pangu_weather_6}"):
-            ort_session_6 = ort.InferenceSession(
-                pangu_weather_6,
-                sess_options=options,
-                providers=self.providers,
-            )
+        # GH: default: 24 and 6h timesteps are not connected
+        else:
+            with self.timer(f"Loading {pangu_weather_24}"):
+                ort_session_24 = ort.InferenceSession(
+                    pangu_weather_24,
+                    sess_options=options,
+                    providers=self.providers,
+                )
+
+            with self.timer(f"Loading {pangu_weather_6}"):
+                ort_session_6 = ort.InferenceSession(
+                    pangu_weather_6,
+                    sess_options=options,
+                    providers=self.providers,
+                )
 
         input_24, input_surface_24 = input, input_surface
 
-        with self.stepper(6) as stepper:
-            for i in range(self.lead_time // 6):
-                step = (i + 1) * 6
+        # GH mods
+        with self.stepper(self.dt) as stepper:
+            for i in range(self.lead_time // self.dt):
+                step = (i + 1) * self.dt
+#        with self.stepper(6) as stepper:
+#            for i in range(self.lead_time // 6):
+#                step = (i + 1) * 6
 
-                if (i + 1) % 4 == 0:
+                if self.dt == 24:
                     output, output_surface = ort_session_24.run(
                         None,
                         {
@@ -101,25 +116,42 @@ class PanguWeather(Model):
                         },
                     )
                     input_24, input_surface_24 = output, output_surface
+
                 else:
-                    output, output_surface = ort_session_6.run(
-                        None,
-                        {
-                            "input": input,
-                            "input_surface": input_surface,
-                        },
-                    )
+                    if (i + 1) % 4 == 0:
+                        output, output_surface = ort_session_24.run(
+                            None,
+                            {
+                                "input": input_24,
+                                "input_surface": input_surface_24,
+                            },
+                        )
+                        input_24, input_surface_24 = output, output_surface
+                    else:
+                        output, output_surface = ort_session_6.run(
+                            None,
+                            {
+                                "input": input,
+                                "input_surface": input_surface,
+                            },
+                        )
+                        
                 input, input_surface = output, output_surface
 
                 # Save the results
 
-                pl_data = output.reshape((-1, 721, 1440))
+                # GH mods to write results every out_ndays
+                out_ndays = 2
+                
+                if (i + 1) % out_ndays == 0:
 
-                for data, f in zip(pl_data, fields_pl):
-                    self.write(data, template=f, step=step)
+                    pl_data = output.reshape((-1, 721, 1440))
 
-                sfc_data = output_surface.reshape((-1, 721, 1440))
-                for data, f in zip(sfc_data, fields_sfc):
-                    self.write(data, template=f, step=step)
+                    for data, f in zip(pl_data, fields_pl):
+                        self.write(data, template=f, step=step)
+
+                    sfc_data = output_surface.reshape((-1, 721, 1440))
+                    for data, f in zip(sfc_data, fields_sfc):
+                        self.write(data, template=f, step=step)
 
                 stepper(i, step)
