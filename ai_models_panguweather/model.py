@@ -99,6 +99,10 @@ class PanguWeather(Model):
 
         input_24, input_surface_24 = input, input_surface
 
+        # GH mods to write results every out_ndays
+        out_nsteps = self.out_nsteps
+        LOG.info('writing output every '+str(out_nsteps)+' steps')
+        
         # GH mods
         with self.stepper(self.dt) as stepper:
             for i in range(self.lead_time // self.dt):
@@ -140,10 +144,7 @@ class PanguWeather(Model):
 
                 # Save the results
 
-                # GH mods to write results every out_ndays
-                out_ndays = 2
-                
-                if (i + 1) % out_ndays == 0:
+                if (i + 1) % out_nsteps == 0:
 
                     pl_data = output.reshape((-1, 721, 1440))
 
